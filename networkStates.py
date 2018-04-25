@@ -18,7 +18,7 @@ class Statearchi:
                  seq_lengh=None,
                  output_size=None,
                  complex=None,
-                 nb_all_parallel=None,
+                 branch=None,
                  nb_consecutif_conv=None,
                  nb_consecutif_pool=None,
                  nb_consecutif_fc=None,# Used for fc and softmax -- number of neurons in layer
@@ -37,7 +37,7 @@ class Statearchi:
             self.lstm_size = lstm_size  # lstm neuron_dim
             self.seq_lengh = seq_lengh
             self.complex=complex
-            self.nb_all_parallel = nb_all_parallel
+            self.branch = branch
             self.output_size=output_size
             self.terminate=terminate
             self.nb_consecutif_conv=nb_consecutif_conv
@@ -56,7 +56,7 @@ class Statearchi:
             self.output_size=state_list[9]
             self.seq_lengh = state_list[10]
             self.complex=state_list[11]
-            self.nb_all_parallel = state_list[12]
+            self.branch = state_list[12]
             self.nb_consecutif_conv = state_list[13]
             self.nb_consecutif_pool = state_list[14]
             self.nb_consecutif_fc = state_list[15]
@@ -72,6 +72,8 @@ class Statearchi:
                     self.seq_lengh,
                     self.batch_size,
                     self.seq_lengh,
+                    self.complex,
+                    self.branch,
                     self.lstm_size,
                     self.terminate,
                     self.nb_consecutif_conv,
@@ -129,7 +131,7 @@ class enumerate:
 
             possible_action_list=[]
             possible_utility_action=[]
-            dictenumer=self.enumerate_state(self, statearchi, q_values,complex=True)
+            dictenumer=self.enumerate_state(self, statearchi,q_values,statecomplex=None,complex=False,branch=j)
             list_all.append(dictenumer)
         actioncomplex=[]
         for terminate_complex in [True,False]:
@@ -173,39 +175,44 @@ class enumerate:
         return action
 
 
-    def enumerate_state(self, statearchi,statecomplex, q_values,complex=False):
+    def enumerate_state(self, statearchi,statecomplex, q_values,branch):
         action = []
         complex_actions=[]
         for complex in [True,False]:
-            if statecomplex!=None and complex==True:
+            if statecomplex!=None and statearchi==None and complex==True:
                 for i in [0,1,2]:
+                    branch=i
                     if i==0 and statecomplex.liststate_branch0!=None:
                         sizei=len(statecomplex.liststate_branch0)
-                        list_all = self.enumerate_complex_actions(self, statecomplex.liststate_branch0[sizei-1], q_values, count_parallel=3)
+                        self.enumerate_state(self, statecomplex.liststate_branch0[sizei-1],statecomplex, q_values,branch)
+                        #should update statecomplex branch0 in this case, after taking action in q_server
                     else:
                         if i == 1 and statecomplex.liststate_branch1!=None:
                             sizei = len(statecomplex.liststate_branch1)
-                            list_all = self.enumerate_complex_actions(self, statecomplex.liststate_branch1[sizei - 1],
-                                                                      q_values, count_parallel=3)
+
+                            self.enumerate_state(self, statecomplex.liststate_branch1[sizei - 1],statecomplex,
+                                                                      q_values,branch)
+                            #should update statecomplex branch1 in this case,after taking action in q_server
                         else:
                             if i == 2 and statecomplex.liststate_branch2!=None:
                                 sizei = len(statecomplex.liststate_branch2)
-                                list_all = self.enumerate_complex_actions(self,
-                                                                          statecomplex.liststate_branch2[sizei - 1],
-                                                                          q_values, count_parallel=3)
+                                self.enumerate_state(self,statecomplex.liststate_branch2[sizei - 1],statecomplex,
+                                                                          q_values,branch)
+                                #should update statecomplex branch2 in this case,after taking action in q_server
                             else:
                                 raise("exepetion in last state")
-                complex_actions+=list_all
+                #complex_actions+=list_all
 
             else:
-                if statecomplex!=None and complex==False:
+                if statecomplex!=None and statearchi==None and complex==False:
                     action+=self.transitional_state(self,statecomplex,q_values)
                 else:
-                    if statearchi!=None and complex==True:
+                    if statearchi!=None and statecomplex==None and complex==True:
                         list_all = self.enumerate_complex_actions(self, statearchi, q_values, count_parallel=3)
                         complex_actions=+list_all
                     else:
-                        if statearchi!=None and complex==False:
+                        if (statearchi!=None and statecomplex==None and complex==False)or\
+                            (statearchi!=None and statecomplex!=None and complex==True):
 
                             if statearchi.terminate == 0:
 
@@ -234,6 +241,7 @@ class enumerate:
                                                                              seq_lengh=0,
                                                                              terminate=0,
                                                                              complex=complex,
+                                                                             branch=branch,
                                                                              nb_consecutif_conv=[(
                                                                                                      statearchi.nb_consecutif_conv + 1) if statearchi.layer_type == 'conv' else 1])  # à ajouter parallèle
                                             else:
@@ -258,6 +266,7 @@ class enumerate:
                                                                              seq_lengh=0,
                                                                              terminate=0,
                                                                              complex=complex,
+                                                                             branch=branch,
                                                                              nb_all_parallel=statearchi.nb_all_parallel + 1,
                                                                              nb_consecutif_conv=[(
                                                                                                      statearchi.nb_consecutif_conv + 1) if statearchi.layer_type == 'conv' else 1])
@@ -281,7 +290,8 @@ class enumerate:
                                                                      fc_size=0,
                                                                      lstm_size=0,  # lstm neuron_dim
                                                                      seq_lengh=0,
-                                                                     parallel=complex,
+                                                                     complex=complex,
+                                                                     branch=branch,
                                                                      nb_consecutif_pool=[
                                                                          statearchi.nb_consecutif_pool + 1 if statearchi.layer_type == 'pool' else 1],
                                                                      terminate=0)
@@ -306,8 +316,8 @@ class enumerate:
                                                                          Statearchi.image_size, filt))[2],
                                                                      # lstm neuron_dim
                                                                      seq_lengh=seq,
-                                                                     nb_all_parallel=0,
                                                                      complex=complex,
+                                                                     branch=branch,
                                                                      terminate=0)
 
                                     if statearchi.layer_type in ['fc', 'pool', 'conv', 'lstm']:
@@ -329,6 +339,7 @@ class enumerate:
                                                                      nb_consecutif_fc=[(
                                                                                            statearchi.nb_consecutif_fc + 1) if statearchi.layer_type == 'fc' else 1],
                                                                      complex=complex,
+                                                                     branch=branch,
                                                                      terminate=0)
 
                                 else:
@@ -342,6 +353,7 @@ class enumerate:
                                                              layer_depth=statearchi.layer_depth + 1,
                                                              fc_size=statearchi.output_size,
                                                              complex=False,
+                                                             branch=-1,
                                                              lstm_size=0,
                                                              seq_lengh=0,
                                                              terminate=1)
